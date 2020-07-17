@@ -18,7 +18,7 @@ module  ip_fifo_ctrl
 #(
 parameter                       FIFO_DEP        = 8,        // not necessary if DEPTH_2N == "TRUE"
 parameter                       FIFO_CDC        = "SYNC",   // "SYNC" or "ASYNC"
-parameter                       DEP_CAL_EN      = 0,
+parameter                       DEP_CAL_EN      = 0,        // depth calculation enable/disable
 parameter                       DEP_CAL_ROUGH   = 0,        // roughly calculation for timing closure
 
 // local generated parameter
