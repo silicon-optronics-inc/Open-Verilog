@@ -14,6 +14,9 @@
 //                         pix12-to-byte4: msb8{P2}, lsb2{P1, P0}, msb8{P1, P0},
 //                                         msb8{P5, P4}, lsb2{P3, P2}, msb8{P3}
 //                         pix16-to-byte4: {P1, P0}, {P3, P2}
+//
+//                         packet format [PACK8N = "PAD"]:
+//                         pixM-to-byteN : {{X{1'b0}}, .... ,pix2, pix1, pix0}
 // -FHDR -----------------------------------------------------------------------
 
 module v2axi4s_m
@@ -28,7 +31,7 @@ parameter                       AUDW            = 3,        // AXI user defined 
                                                             // "P2B": re-pack pixel to byte alligned format
                                                             //        AODW = 32 if PX_RATE==1;
                                                             //        AODW = 64 if PX_RATE==2
-parameter                       PACK8N          = "P2B",    // "PAD": padding msb zero if VIDW*n < AODW
+parameter                       PACK8N          = "P2B",    // "PAD": padding msb zero if VIDW*m < AODW
 parameter                       FIFO_DEP        = 8,        // FIFO depth 2^N
 parameter                       FIFO_CDC        = "ASYNC",  // "SYNC" or "ASYNC"
 parameter                       FIFO_TYPE       = "FPGA_BLKRAM",
@@ -73,16 +76,18 @@ output                          o_fifo_empty
 //----------------------------------------------------------//
 // Local Parameter                                          //
 //----------------------------------------------------------//
-
-localparam              QUE_DW          = PACK8N == "PAD" ? (AODW/VIDW)*VIDW : AODW;// Queue data width
+                                                            // Queue data width
+localparam              QUE_DW          = PACK8N == "P2B" ? AODW : (AODW/VIDW)*VIDW;
 
 localparam              FIFO_AW         = log2(FIFO_DEP);
 localparam              FIFO_DW         = QUE_DW + 1;       // +1 for companion sync signal
 
-localparam              PKD_SZ          = (PXDW < 16  ?  8 : // packet data size
-                                           PXDW < 32  ? 16 : 32)*PX_RATE;
+                                                            // packet data size
+localparam              PKD_SZ          = PACK8N == "P2B" ? (PXDW < 16  ?  8 :
+                                                             PXDW < 32  ? 16 : 32)*PX_RATE : QUE_DW;
 
-localparam              PKC_SZ          = AODW/(PKD_SZ/PX_RATE);      // packet counter size
+                                                            // packet counter size
+localparam              PKC_SZ          = PACK8N == "P2B" ? AODW/(PKD_SZ/PX_RATE) : PKD_SZ/VIDW;
 localparam              PKC_DW          = log2(PKC_SZ);
 
 //----------------------------------------------------------//
@@ -90,7 +95,7 @@ localparam              PKC_DW          = log2(PKC_SZ);
 //----------------------------------------------------------//
 
 //
-wire [VIDW-1:0]         pdat_mx;
+wire[VIDW-1:0]          pdat_mx;
 
 reg [ 1:0]              vi_hcnt_lsb;                        // pixel counter on LSB part
 wire[ 1:0]              vi_hcnt_lsb_nxt;
@@ -117,6 +122,9 @@ reg                     pkt_lsb_vld;
 
 wire                    pkt_cyc_end;
 wire                    pkt_vld;
+wire                    pkt_wr;
+wire                    pkt_vld_ext_nxt;
+reg                     pkt_vld_ext;
 reg [ 7:0]              pkt_ovf_dat;
 wire[ 7:0]              pkt_ovf_dat_nxt;
 reg                     pkt_ovf_vld;
@@ -183,6 +191,7 @@ wire                    sxa_hstr;
 wire                    sxa_hend;
 
 wire[4:0]               pkt_md;                             // for monitor module reference
+integer                 i;
 
 //----------------------------------------------------------//
 // Code Descriptions                                        //
@@ -207,14 +216,17 @@ assign  hsyn_mark_nxt   = ~hsyn_mark ? i_hstr | i_hend : ~fifo_push;
 
 assign  fm_vin_en_nxt = ((i_vin_en & i_fstr) | fm_vin_en) & ~(~i_vin_en & i_fstr);
 
-assign  fifo_push_nxt = pkt_vld & fm_vin_en;
+assign  fifo_push_nxt = pkt_wr & fm_vin_en;
 assign  fifo_wd       = {hsyn_mark, px_que};
 
+assign  pkt_wr        = (pkt_vld | pkt_vld_ext) & ~o_fifo_nfull;
+// extend pkt_vld until fifo is not near full
+assign  pkt_vld_ext_nxt = ((pkt_vld & o_fifo_nfull) | pkt_vld_ext) & o_fifo_nfull;
 
 // Data Packing
 // ---------------------------
-
 generate
+
 if (PACK8N == "P2B") begin: gen_pack_p2b
 
 assign  pkt_cnt_inc = i_href;
@@ -237,7 +249,7 @@ assign  pkt_md      = 8;
 assign  pkt_lsb_nxt = 0;
 
 assign  lsb_lat_en_nxt = 0;
-assign  pkt_vld     = (pkt_cnt[PKC_DW-1 -: 2] == PKC_SZ/PX_RATE -1) & i_href;
+assign  pkt_vld     = ((pkt_cnt[PKC_DW-1 -: 2] == PKC_SZ/PX_RATE -1) & i_href) | i_hend;
 
 always @*
    px_que_nxt = i_href ? {i_pdat[VIDW-1 -: PKD_SZ], px_que[QUE_DW-1 : PKD_SZ]} : px_que;
@@ -252,7 +264,7 @@ assign  pdat_mx     = PX_RATE == 2 ? {i_pdat[PXDW+2 +: 8],i_pdat[0+2 +: 8],i_pda
 assign  pkt_lsb_nxt = i_href ? {pdat_mx[0 +: 2*PX_RATE], pkt_lsb[2*PX_RATE +: (8-2*PX_RATE)]} : pkt_lsb;
 
 assign  lsb_lat_en_nxt = PX_RATE == 2 ? vi_hcnt_lsb_nxt[0] : vi_hcnt_lsb_nxt[1:0] == 3;
-assign  pkt_vld     = ((pkt_cnt[PKC_DW-1 -: 2] == PKC_SZ/PX_RATE -1) | pkt_cyc_end) & i_href;
+assign  pkt_vld     = (((pkt_cnt[PKC_DW-1 -: 2] == PKC_SZ/PX_RATE -1) | pkt_cyc_end) & i_href) | i_hend;
 
 always @* begin
 
@@ -285,7 +297,7 @@ assign  pkt_lsb_nxt = i_href ? (PX_RATE == 2 ? pdat_mx[0 +: 8] :
                                               {pdat_mx[0 +: 4], pkt_lsb[4 +: 4]}) : pkt_lsb;
 
 assign  lsb_lat_en_nxt = PX_RATE == 2 ? (i_hstr | lsb_lat_en) & ~i_hend : vi_hcnt_lsb_nxt[0];
-assign  pkt_vld     = ((pkt_cnt[PKC_DW-1 -: 2] == PKC_SZ/PX_RATE -1) | pkt_cyc_end) & i_href;
+assign  pkt_vld     = (((pkt_cnt[PKC_DW-1 -: 2] == PKC_SZ/PX_RATE -1) | pkt_cyc_end) & i_href) | i_hend;
 
 always @* begin
 
@@ -315,10 +327,10 @@ assign  pkt_md      = 16;
 assign  pkt_lsb_nxt = 0;
 
 assign  lsb_lat_en_nxt = 0;
-assign  pkt_vld     = (pkt_cnt[PKC_DW-1 -: 1] == PKC_SZ/PX_RATE -1);
+assign  pkt_vld     = ((pkt_cnt[PKC_DW-1 -: 1] == PKC_SZ/PX_RATE -1) & i_href) | i_hend;
 
 always @*
-   px_que_nxt = {i_pdat[VIDW-1 -: PKD_SZ], px_que[QUE_DW-1 : PKD_SZ]};
+   px_que_nxt = i_href ? {i_pdat[VIDW-1 -: PKD_SZ], px_que[QUE_DW-1 : PKD_SZ]} : px_que;
 
    end
 endcase
@@ -327,16 +339,27 @@ end // gen_pack_p2b
 
 else begin: gen_pack_pad
 
-
-assign  pkt_vld     = i_href;
-
-assign  px_que_nxt  = {{QUE_DW-VIDW{1'b0}}, i_pdat};
+assign  pkt_cnt_inc = i_href;
+assign  pkt_cnt_clr = i_hend | pkt_vld;
+assign  pkt_cnt_nxt = (pkt_cnt_inc ? pkt_cnt + 1'b1 : pkt_cnt) & {PKC_DW{~pkt_cnt_clr}};
 
 assign  pkt_md      = 0;
 
-end
-endgenerate
+assign  lsb_lat_en_nxt = 0;
 
+assign  pkt_vld     = ((pkt_cnt == PKD_SZ/VIDW -1) & i_href) | i_hend;
+
+always @*
+//   px_que_nxt = i_href ? ((QUE_DW > VIDW) ? {i_pdat[VIDW-1 : 0], px_que[QUE_DW-1 : VIDW]} :
+//                                            i_pdat ) : px_que;
+   for (i=0; i < PKC_SZ; i=i+1) begin
+      px_que_nxt[i*VIDW +: VIDW] = pkt_cnt == i && i_href ? i_pdat[VIDW-1 : 0] : px_que[i*VIDW +: VIDW];
+
+   end
+
+end
+
+endgenerate
 
 
 // AXI4-Stream interface
@@ -353,29 +376,27 @@ assign  fifo_pop_en_nxt = ~fifo_empty & tready;
 assign  fifo_pop        = fifo_pop_en & fifo_pop_en_nxt;    // delay 1-T after non-empty
 assign  fifo_pop_q_nxt  = {fifo_pop_q[0], fifo_pop};
 
-assign  tready_q_nxt  = {tready_q[0], tready};
-assign  tready_f      = ~tready      & tready_q[0];
-assign  tready_f_q    = ~tready_q[0] & tready_q[1];
-
 assign  rd_vld          = fifo_pop_q[1];    // 2 clk latency due to SRAM read latency
 
     // queue to temporary store FIFO read data after pop disable
-assign  que0_vld_nxt = ~que0_vld ? ~tready & rd_vld : ~(tready & ~que_sel);
+assign  que0_vld_nxt  = ~que0_vld ? ~tready & rd_vld : ~(tready & ~que_sel);
 
-assign  que1_vld_nxt = ~que1_vld ? que0_vld & rd_vld : ~(tready & que_sel);
+assign  que1_vld_nxt  = ~que1_vld ? que0_vld & rd_vld : ~(tready & que_sel);
 
 assign  rd_que_nxt[0] = que0_vld_nxt & ~que0_vld ? fifo_rd : rd_que[0];
 assign  rd_que_nxt[1] = que1_vld_nxt & ~que1_vld ? fifo_rd : rd_que[1];
 
-assign  que_sel_nxt  = ~que_sel ? que0_vld & tready : ~tready;
+assign  que_sel_nxt   = ~que_sel ? que0_vld & tready : ~tready;
 
+assign  tready_q_nxt  = {tready_q[0], tready};
+assign  tready_f      = ~tready      & tready_q[0];
+assign  tready_f_q    = ~tready_q[0] & tready_q[1];
 
 // AXI4-stream output
 // ---------------------------
 
 assign  dato_vld   = (que0_vld & ~que_sel) | (que1_vld & que_sel) | rd_vld;
 assign  tvalid_nxt = ~tvalid ? dato_vld & tready : ~(~dato_vld & tready);
-
 
 assign  tx_vld     = tvalid & tready;
 
@@ -471,6 +492,7 @@ endgenerate
       fm_vin_en         <= 0;
       pkt_cnt           <= 0;
       hsyn_mark         <= 0;
+      pkt_vld_ext       <= 0;
       pkt_lsb           <= 0;
       lsb_lat_en        <= 0;
       pkt_lsb_vld       <= 0;
@@ -484,6 +506,7 @@ endgenerate
       fm_vin_en         <= fm_vin_en_nxt;
       pkt_cnt           <= pkt_cnt_nxt;
       hsyn_mark         <= hsyn_mark_nxt;
+      pkt_vld_ext       <= pkt_vld_ext_nxt;
       pkt_lsb           <= pkt_lsb_nxt;
       lsb_lat_en        <= lsb_lat_en_nxt;
       pkt_lsb_vld       <= pkt_lsb_vld_nxt;
@@ -601,7 +624,7 @@ generate
 
 if (ILA_DBG_EN) begin: gen_ila
 
-dbg_ila_8x8   csi_obuf_ila (
+dbg_ila_8x8   dbg_ila (
   .clk              (),
   .probe0           (),
   .probe1           (),
