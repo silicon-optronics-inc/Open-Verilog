@@ -10,7 +10,9 @@
 ![image](https://github.com/silicon-optronics-inc/Open-Verilog/blob/master/doc/gamma1.png)
 ![image](https://github.com/silicon-optronics-inc/Open-Verilog/blob/master/doc/gamma2.png)
 
-* ip_v2axi4s_m_rtl.v: video to AXI4-stream master conversion.
+* ip_v2axi4s_m_rtl.v: Native video to AXI4-stream master conversion
+
+* ip_axi4s2v_s_rtl.v: AXI4-stream slave to native video conversion
 
 * parking-guide-line: A design to draw color, transparency, angle, and line width programmable parking guide line.
 
