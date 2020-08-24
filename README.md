@@ -9,6 +9,8 @@
 
 * ip_pwr2_rtl.v: Power of 2 calculation by muli-cycle operation
 
+* ip_vtm_rtl.v: Native video timing generator
+
 * gm_curve_rtl.v: Gamma correction and user defined curve. Bending strength of the curve is adjustable by 16 index.
 
 ![image](https://github.com/silicon-optronics-inc/Open-Verilog/blob/master/doc/gamma1.png)
