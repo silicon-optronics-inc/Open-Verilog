@@ -9,7 +9,11 @@
 
 * ip_pwr2_rtl.v: Power of 2 calculation by muli-cycle operation
 
+* ip_log2int_rtl.v: integer-part of Log2 calculation by muli-cycle operation
+
 * ip_vtm_rtl.v: Native video timing generator
+                frame start, frame end,
+                horizontal line start/end, href
 
 * gm_curve_rtl.v: Gamma correction and user defined curve. Bending strength of the curve is adjustable by 16 index.
 
