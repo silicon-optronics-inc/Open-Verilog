@@ -5,6 +5,10 @@
 
 * ip_sincos_gen_rtl.v: Sine, Cosine function generator by single-stage Modified CORDIC method.
 
+* ip_spi_m_rtl.v: A SPI Master
+
+* ip_pwr2_rtl.v: Power of 2 calculation by muli-cycle operation
+
 * gm_curve_rtl.v: Gamma correction and user defined curve. Bending strength of the curve is adjustable by 16 index.
 
 ![image](https://github.com/silicon-optronics-inc/Open-Verilog/blob/master/doc/gamma1.png)
